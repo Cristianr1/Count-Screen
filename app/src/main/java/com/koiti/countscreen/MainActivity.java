@@ -6,6 +6,7 @@ import android.content.ContentResolver;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.MediaController;
@@ -52,43 +53,33 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onCompletion(MediaPlayer mp) {
                 video_index++;
-                if (video_index < (videosArrayList.size())) {
-                    videoView.setVideoURI(videosArrayList.get(video_index));
-                    videoView.start();
-                } else {
+                if (video_index >= (videosArrayList.size())) {
                     video_index = 0;
-                    videoView.setVideoURI(videosArrayList.get(video_index));
-                    videoView.start();
                 }
+                videoView.setVideoURI(videosArrayList.get(video_index));
+                videoView.start();
             }
         });
 
-        if(videosArrayList.size()>0) {
+        if (videosArrayList.size() > 0) {
             videoView.setVideoURI(videosArrayList.get(0));
             videoView.start();
         }
-//        if (videosArrayList.size() <= 1)
-//            videoView.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-//                @Override
-//                public void onPrepared(MediaPlayer mp) {
-//                    mp.setLooping(true);
-//                }
-//            });
 
         MediaController mediaController = new MediaController(this);
         videoView.setMediaController(mediaController);
         mediaController.setAnchorView(videoView);
 
-        new Thread(new ThreadMessageReceived()).start();
+        new Thread(new ThreadReceiveRequest()).start();
     }
 
-    class ThreadMessageReceived implements Runnable {
+
+    class ThreadReceiveRequest implements Runnable {
         private volatile boolean exit = false;
-        private BufferedReader input;
 
         @Override
         public void run() {
-            Socket socket;
+
             try {
                 serverSocket = new ServerSocket(ConnectionParameters.SERVER_PORT);
                 runOnUiThread(new Runnable() {
@@ -98,46 +89,70 @@ public class MainActivity extends AppCompatActivity {
                         textIp.setText(socketHandle.getServerIp());
                     }
                 });
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
 
+            while (!exit) {
                 try {
-                    socket = serverSocket.accept();
-                    input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    Socket socket = serverSocket.accept();
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             textIp.setVisibility(View.INVISIBLE);
                         }
                     });
+                    new Thread(new ClientHandler(socket)).start();
+
                 } catch (IOException e) {
                     e.printStackTrace();
-                }
-
-                while (!exit) {
-                    final StringBuilder sbMessage = new StringBuilder("Cupo Disponible: ");
                     try {
-                        final String message = input.readLine();
-                        if (message != null) {
-                            runOnUiThread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    textCount.setText(sbMessage.append(message));
-                                }
-                            });
-                        } else {
-                            exit = true;
-                            try {
-                                serverSocket.close();
-                            } catch (IOException ex) {
-                                ex.printStackTrace();
-                            }
-                            new Thread(new ThreadMessageReceived()).start();
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                        exit = true;
+                        serverSocket.close();
+                        new Thread(new ThreadReceiveRequest()).start();
+                    } catch (IOException ex) {
+                        ex.printStackTrace();
                     }
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
+            }
+        }
+    }
+
+    class ClientHandler implements Runnable {
+        private final Socket socket;
+
+        public ClientHandler(Socket s) {
+            this.socket = s;
+        }
+
+        @Override
+        public void run() {
+            boolean exit = false;
+
+            while (!exit) {
+                try {
+                    BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    final String messageReceived = input.readLine();
+                    final StringBuilder sbMessage = new StringBuilder("Cupo Disponible: ");
+                    if (messageReceived != null)
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                textCount.setText(sbMessage.append(messageReceived));
+                            }
+                        });
+                    else {
+                        socket.close();
+                        exit = true;
+                    }
+                } catch (IOException e) {
+                    try {
+                        socket.close();
+                        exit = true;
+                    } catch (IOException ex) {
+                        ex.printStackTrace();
+                    }
+                }
             }
         }
     }
